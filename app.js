@@ -275,8 +275,10 @@ function vSession() {
   const a = S.active;
   const done = a.exercises.reduce((s, e) => s + e.sets.filter(x => x.done).length, 0), all = a.exercises.reduce((s, e) => s + e.sets.length, 0);
   const names = [...new Set([...S.program.days.flatMap(d => d.exercises.map(e => e.name)), ...S.log.flatMap(w => w.exercises.map(e => e.name))])];
-  let h = `<div class="head"><div><div class="muted small">${a.editingId ? "Редактирование" : "Идёт тренировка"}</div><h1>${esc(a.dayName)}</h1></div>
-    <span class="num muted">${done}/${all}</span></div>
+  const exitBtn = a.editingId ? confirmBtn("cancel", "Выйти без изменений")
+    : done ? confirmBtn("cancel", "Выйти без сохранения") : `<button class="danger" data-act="cancel">Выйти</button>`;
+  let h = `<div class="head"><div><div class="muted small">${a.editingId ? "Редактирование" : "Идёт тренировка"} · <span class="num">${done}/${all}</span></div><h1>${esc(a.dayName)}</h1></div>
+    ${exitBtn}</div>
     <label class="f">Дата<input type="date" value="${a.date}" data-bind="active.date" data-type="date" id="s-date"></label>`;
   h += a.exercises.map((e, ei) => {
     const complete = e.sets.length && e.sets.every(s => s.done);
@@ -302,7 +304,7 @@ function vSession() {
     <datalist id="exnames">${names.map(x => `<option value="${esc(x)}">`).join("")}</datalist></section>
     <label class="f">Заметка к тренировке<textarea data-bind="active.note" id="s-wnote" placeholder="Самочувствие, что поменять в следующий раз">${esc(a.note)}</textarea></label>
     <div class="bar-actions"><button class="primary" data-act="finish">${a.editingId ? "Сохранить изменения" : "Завершить и сохранить"}</button>
-      ${confirmBtn("cancel", a.editingId ? "Отменить изменения" : "Удалить эту тренировку")}</div>`;
+      ${a.editingId ? confirmBtn("cancel", "Отменить изменения") : done ? confirmBtn("cancel", "Выйти без сохранения") : `<button class="danger" data-act="cancel">Выйти без сохранения</button>`}</div>`;
   return h;
 }
 
@@ -465,7 +467,7 @@ document.addEventListener("click", e => {
       save(); render(); $(`#ex-${a.exercises.length - 1}`)?.scrollIntoView({ block: "center" }); break;
     }
     case "finish": finishWorkout(); break;
-    case "cancel": S.active = null; stopRest(); releaseWake(); save(); render(); toast("Тренировка не сохранена"); break;
+    case "cancel": { const ed = S.active?.editingId; S.active = null; stopRest(); releaseWake(); save(); view = ed ? { tab: "history", open: ed } : { tab: "today" }; render(); scrollTo(0, 0); toast(ed ? "Изменения отменены" : "Вышел из тренировки, ничего не сохранено"); break; }
     case "rest-add": if (rest) { rest.end = Math.max(rest.end, Date.now()) + 30000; rest.beeped = false; drawRest(); } break;
     case "rest-stop": stopRest(); break;
     case "open-w": view = { tab: "history", open: b.dataset.id }; render(); scrollTo(0, 0); break;

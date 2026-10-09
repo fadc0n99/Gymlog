@@ -1,5 +1,5 @@
 // Офлайн-кэш приложения. При изменении файлов увеличь номер версии.
-const CACHE = "gymlog-v2";
+const CACHE = "gymlog-v3";
 const FILES = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest",
   "icon-180.png", "icon-192.png", "icon-512.png"];
 
