@@ -88,6 +88,7 @@ function save() {
 }
 S = load() || { program: defaultProgram(), log: defaultLog(), active: null, settings: { rest: 120 }, nextDayId: null };
 S.settings ||= { rest: 120 };
+S.body ||= [];
 save();
 try { navigator.storage?.persist?.(); } catch (e) { }
 
@@ -221,8 +222,8 @@ function spark(vals) {
 }
 function lineChart(pts, label) { // pts: [{x:iso, y}]
   const W = 600, H = 170, L = 40, R = 14, T = 12, B = 22;
-  const ys = pts.map(p => p.y), lo = Math.min(...ys), hi = Math.max(...ys), padY = Math.max((hi - lo) * .15, 2.5);
-  const y0 = Math.max(0, lo - padY), y1 = hi + padY, st = niceStep(y1 - y0, 3);
+  const ys = pts.map(p => p.y), lo = Math.min(...ys), hi = Math.max(...ys), padY = Math.max((hi - lo) * .2, hi * .01 + .5);
+  const y0 = Math.max(0, lo - padY), y1 = hi + padY, st = niceStep(y1 - y0, 4);
   const X = i => pts.length < 2 ? (L + W - R) / 2 : L + i * (W - L - R) / (pts.length - 1), Y = v => T + (H - T - B) * (1 - (v - y0) / (y1 - y0));
   let s = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(label)}">`;
   for (let v = Math.ceil(y0 / st) * st; v <= y1 + 1e-9; v += st) s += `<line x1="${L}" x2="${W - R}" y1="${Y(v)}" y2="${Y(v)}" stroke="var(--line)"/><text x="${L - 6}" y="${Y(v) + 4}" text-anchor="end">${fnum(+v.toFixed(2))}</text>`;
@@ -247,6 +248,61 @@ function weeksChart() {
   return s + "</svg>";
 }
 
+
+/* ---------- группы мышц ---------- */
+const GROUPS = ["Грудь", "Спина", "Плечи", "Бицепс", "Трицепс", "Ноги", "Пресс"];
+function autoGroup(name) {
+  const n = name.toLowerCase().replace(/ё/g, "е");
+  if (/пресс|скруч|планк/.test(n)) return "Пресс";
+  if (/присед|выпад|ног|ягод|бедр|икр|румынск|станов|зашаг/.test(n)) return "Ноги";
+  if (/разгибани.*рук|трицеп|француз|из-за головы/.test(n)) return "Трицепс";
+  if (/сгибани.*рук|бицеп|молот/.test(n)) return "Бицепс";
+  if (/над голов|жим гантелей стоя|мах|дельт|face pull|к лицу|армейск/.test(n)) return "Плечи";
+  if (/тяг|подтяг|гиперэкст|пуловер|приведени/.test(n)) return "Спина";
+  if (/жим|груд|отжим|брус|развод/.test(n)) return "Грудь";
+  return null;
+}
+const groupOf = name => (S.settings.groups || {})[keyOf(name)] || autoGroup(name);
+function groupSets(fromDays, toDays) {
+  const now = Date.now(), c = Object.fromEntries(GROUPS.map(g => [g, 0]));
+  S.log.forEach(w => { const a = (now - parse(w.date)) / DAY; if (a < fromDays || a >= toDays) return;
+    w.exercises.forEach(e => { const g = groupOf(e.name); if (g) c[g] += e.sets.length; }); });
+  return c;
+}
+function groupsBlock() {
+  const cur = groupSets(-1, 7), prev = groupSets(7, 14), max = Math.max(20, ...Object.values(cur)), pct = v => v / max * 100;
+  return `<div class="card groups">${GROUPS.map(g => `<div class="g${cur[g] ? "" : " zero"}"><span>${g}</span>
+    <div class="track"><div class="norm" style="left:${pct(10)}%;width:${pct(20) - pct(10)}%"></div><div class="fill${cur[g] > 20 ? " over" : ""}" style="width:${pct(cur[g])}%"></div></div>
+    <b class="num">${cur[g]}</b><span class="muted small num">${prev[g]}</span></div>`).join("")}
+    <p class="muted small">Подходы за последние 7 дней, справа — предыдущие 7. Светлая полоса — 10–20 подходов в неделю, обычный ориентир для роста мышц. Новичку хватает и 6–10.</p></div>`;
+}
+
+/* ---------- календарь и регулярность ---------- */
+const monOf = d => { const x = new Date(d); x.setHours(12, 0, 0, 0); x.setDate(x.getDate() - (x.getDay() + 6) % 7); return x; };
+function calendarBlock() {
+  const N = 18, end = new Date(); end.setHours(12, 0, 0, 0);
+  const start = monOf(end); start.setDate(start.getDate() - 7 * (N - 1));
+  const by = {}; S.log.forEach(w => by[w.date] = (by[w.date] || 0) + setsN(w));
+  let cells = "";
+  for (let i = 0; i < N * 7; i++) {
+    const d = new Date(start); d.setDate(d.getDate() + i); const iso = isoOf(d);
+    if (d > end) { cells += `<i class="fut"></i>`; continue; }
+    const n = by[iso] || 0, l = !n ? "" : n <= 10 ? "l1" : n <= 20 ? "l2" : "l3";
+    cells += `<i class="${l}${iso === isoOf(end) ? " now" : ""}" title="${d.getDate()} ${MONTHS[d.getMonth()]}${n ? ": " + n + " подх." : ""}"></i>`;
+  }
+  return `<div class="card"><div class="cal-wrap"><div class="cal-days"><span>пн</span><span></span><span>ср</span><span></span><span>пт</span><span></span><span>вс</span></div><div class="cal">${cells}</div></div>
+    <div class="legend">меньше <i></i><i class="l1"></i><i class="l2"></i><i class="l3"></i> больше подходов</div></div>`;
+}
+function regularity() {
+  const weeks = new Set(S.log.map(w => isoOf(monOf(parse(w.date)))));
+  let streak = 0; const m = monOf(new Date());
+  if (!weeks.has(isoOf(m))) m.setDate(m.getDate() - 7); // текущая неделя ещё не закончилась
+  while (weeks.has(isoOf(m))) { streak++; m.setDate(m.getDate() - 7); }
+  const now = Date.now(), last28 = S.log.filter(w => (now - parse(w.date)) / DAY < 28);
+  const mins = S.log.filter(w => w.minutes).slice(-10).map(w => w.minutes);
+  return { streak, perWeek: last28.length / 4, avgMin: mins.length ? Math.round(mins.reduce((a, b) => a + b, 0) / mins.length) : null };
+}
+
 /* ---------- экраны ---------- */
 function render() {
   document.querySelectorAll("#tabs button").forEach(b => b.classList.toggle("on", b.dataset.v === view.tab));
@@ -254,6 +310,7 @@ function render() {
   m.innerHTML = view.tab === "today" ? (S.active ? vSession() : vToday())
     : view.tab === "history" ? (view.open ? vWorkout(view.open) : vHistory())
     : view.tab === "progress" ? (view.ex ? vExercise(view.ex) : vProgress())
+    : view.tab === "body" ? (view.bodyEdit ? vBodyEdit() : vBody())
     : (view.day ? vDayEdit(view.day) : vProgram());
 }
 
@@ -341,10 +398,16 @@ function vProgress() {
   S.log.forEach(w => w.exercises.forEach(e => { const k = keyOf(e.name); if (!map.has(k)) map.set(k, e.name); }));
   const exs = [...map.values()].map(name => ({ name, ss: sessionsOf(name) })).filter(x => x.ss.length)
     .sort((a, b) => b.ss.at(-1).date.localeCompare(a.ss.at(-1).date));
+  const rg = regularity();
   let h = `<h1>Прогресс</h1>
     <div class="tiles"><div class="tile"><b>${S.log.length}</b><span>всего тренировок</span></div>
+    <div class="tile"><b>${fnum(Math.round(rg.perWeek * 10) / 10)}</b><span>в неделю, ср. за 4 нед.</span></div>
+    <div class="tile"><b>${rg.streak}</b><span>${plural(rg.streak, "неделя", "недели", "недель")} подряд без пропусков</span></div>
     <div class="tile"><b>${S.log.filter(w => ago(w.date) <= 30).length}</b><span>за 30 дней</span></div>
-    <div class="tile"><b>${kg(wkVol)}</b><span>тоннаж за 7 дней</span></div></div>
+    <div class="tile"><b>${kg(wkVol)}</b><span>тоннаж за 7 дней</span></div>
+    <div class="tile"><b>${rg.avgMin ?? "—"}</b><span>мин — средняя тренировка</span></div></div>
+    <section><h2>Календарь</h2>${calendarBlock()}</section>
+    <section><h2>Группы мышц</h2>${groupsBlock()}</section>
     <section><h2>Тренировок в неделю</h2><div class="card chart">${weeksChart()}</div></section>`;
   if (!exs.length) return h + `<div class="empty">Графики по упражнениям появятся после первой тренировки.</div>`;
   h += `<section><h2>Упражнения</h2><div class="list">${exs.map(x => {
@@ -397,6 +460,8 @@ function vDayEdit(id) {
     ${d.exercises.map((e, ei) => `<section class="pex">
       <label class="f">Упражнение<input value="${esc(e.name)}" data-bind="program.days.${di}.exercises.${ei}.name" id="p-n-${ei}"></label>
       <label class="f">Подсказка<input value="${esc(e.note)}" placeholder="Техника, хват, вес одной гантели…" data-bind="program.days.${di}.exercises.${ei}.note" id="p-note-${ei}"></label>
+      <label class="f">Группа мышц<select id="p-g-${ei}" data-group="${esc(e.name)}">${(() => { const ov = (S.settings.groups || {})[keyOf(e.name)], au = autoGroup(e.name);
+        return `<option value="">Авто${au ? ": " + au.toLowerCase() : " — не определена"}</option>` + GROUPS.map(g => `<option${ov === g ? " selected" : ""}>${g}</option>`).join(""); })()}</select></label>
       <div class="phead"><span>#</span><span>Вес, кг</span><span>Повторы</span><span></span></div>
       ${e.sets.map((s, si) => `<div class="pset"><span class="i">${si + 1}</span>
         <input inputmode="decimal" value="${fnum(s.w)}" placeholder="—" data-bind="program.days.${di}.exercises.${ei}.sets.${si}.w" data-type="num" id="p-w-${ei}-${si}" aria-label="Вес">
@@ -410,9 +475,57 @@ function vDayEdit(id) {
     <div class="bar-actions">${confirmBtn("day-del", "Удалить день")}</div>`;
 }
 
+
+/* ---------- тело: вес и замеры ---------- */
+const METRICS = [["weight", "Вес", "кг"], ["fat", "Жир", "%"], ["waist", "Талия", "см"], ["chest", "Грудь", "см"],
+  ["hips", "Ягодицы", "см"], ["biceps", "Бицепс", "см"], ["thigh", "Бедро", "см"], ["neck", "Шея", "см"]];
+let draft = null;
+const bodySorted = () => [...S.body].sort((a, b) => a.date.localeCompare(b.date));
+const signed = (v, u) => v == null ? "" : `${v > 0 ? "+" : v < 0 ? "−" : "±"}${fnum(Math.abs(Math.round(v * 10) / 10))} ${u}`;
+
+function vBody() {
+  const B = bodySorted(), m = view.metric || "weight", def = METRICS.find(x => x[0] === m);
+  let h = `<div class="head"><h1>Тело</h1><button class="primary" data-act="body-new">+ Запись</button></div>`;
+  if (!B.length) return h + `<div class="empty">Записывай вес и замеры раз в неделю, утром натощак. Здесь появятся графики и изменения.</div>${heightCard()}`;
+  const tiles = METRICS.map(([k, label, u]) => {
+    const pts = B.filter(e => e[k] != null); if (!pts.length) return "";
+    const last = pts.at(-1), prev = pts.at(-2), first = pts[0];
+    const d = prev ? last[k] - prev[k] : null;
+    const goodDown = k === "weight" || k === "fat" || k === "waist";
+    const cls = d == null || d === 0 ? "" : (d < 0) === goodDown ? "up" : "down";
+    return `<button class="tile mt${k === m ? " on" : ""}" data-act="metric" data-k="${k}"><b>${fnum(last[k])}<small> ${u}</small></b><span>${label}</span>
+      ${d != null ? `<em class="${cls}">${signed(d, u)}</em>` : ""}${pts.length > 2 ? `<span class="muted">с начала ${signed(last[k] - first[k], u)}</span>` : ""}</button>`;
+  }).join("");
+  const hgt = S.settings.height, lw = B.filter(e => e.weight != null).at(-1);
+  const bmi = hgt && lw ? lw.weight / (hgt / 100) ** 2 : null;
+  const pts = B.filter(e => e[m] != null);
+  h += `<div class="tiles">${tiles}${bmi ? `<div class="tile"><b>${fnum(Math.round(bmi * 10) / 10)}</b><span>ИМТ</span></div>` : ""}</div>`;
+  h += `<section><h2>${def[1]}, ${def[2]}</h2><div class="card chart">${pts.length ? lineChart(pts.map(e => ({ x: e.date, y: e[m] })), def[1]) : `<p class="muted small">Пока нет записей с этим замером.</p>`}</div></section>`;
+  h += `<section><h2>Записи</h2><div class="list">${[...B].reverse().map(e => `<div class="li" data-act="body-open" data-id="${e.id}">
+    <div><div>${fmtDate(e.date)}</div><div class="muted small">${METRICS.filter(([k]) => k !== "weight" && e[k] != null).map(([k, l, u]) => `${l} ${fnum(e[k])}`).join(" · ") || (e.note ? esc(e.note) : "")}</div></div>
+    <div class="r">${e.weight != null ? fnum(e.weight) + "<span class='muted small'> кг</span>" : ""}</div></div>`).join("")}</div></section>`;
+  return h + heightCard();
+}
+function heightCard() {
+  return `<section class="card"><label class="f">Рост, см — для расчёта ИМТ<input inputmode="decimal" id="height" value="${fnum(S.settings.height)}" placeholder="например, 180"></label></section>`;
+}
+function vBodyEdit() {
+  const prev = bodySorted().filter(e => e.id !== draft.id).at(-1) || {};
+  const isNew = !S.body.some(e => e.id === draft.id);
+  return `<button class="ghost back" data-act="body-cancel">‹ Тело</button><h1>${isNew ? "Новая запись" : "Изменить запись"}</h1>
+    <label class="f">Дата<input type="date" id="b-date" value="${draft.date}" data-draft="date"></label>
+    <div class="bgrid">${METRICS.map(([k, l, u]) => `<label class="f">${l}, ${u}<input inputmode="decimal" id="b-${k}" value="${fnum(draft[k])}" placeholder="${prev[k] != null ? "было " + fnum(prev[k]) : ""}" data-draft="${k}" data-type="num"></label>`).join("")}</div>
+    <label class="f">Заметка<input id="b-note" value="${esc(draft.note || "")}" data-draft="note" placeholder="Самочувствие, питание…"></label>
+    <p class="muted small">Заполняй только то, что измерял. Замеры — сантиметровой лентой по самому широкому (талия — по самому узкому) месту, в одно и то же время суток.</p>
+    <div class="bar-actions"><button class="primary" data-act="body-save">Сохранить</button>${isNew ? "" : confirmBtn("body-del", "Удалить запись")}</div>`;
+}
+
 /* ---------- ввод ---------- */
 document.addEventListener("input", e => {
-  const el = e.target, path = el.dataset.bind; if (!path) return;
+  const el = e.target;
+  if (el.dataset.draft && draft) { draft[el.dataset.draft] = el.dataset.type === "num" ? toNum(el.value) : el.value; return; }
+  if (el.id === "height") { S.settings.height = toNum(el.value); save(); return; }
+  const path = el.dataset.bind; if (!path) return;
   let v = el.value;
   if (el.dataset.type === "num") v = toNum(v);
   else if (el.dataset.type === "int") { const x = toNum(v); v = x == null ? null : Math.round(x); }
@@ -424,6 +537,7 @@ document.addEventListener("change", e => {
   if (el.id === "restSel") { S.settings.rest = +el.value; save(); toast("Таймер отдыха: " + el.selectedOptions[0].text); }
   if (el.id === "nextSel") { S.nextDayId = el.value; save(); toast("Следующий: " + el.selectedOptions[0].text); }
   if (el.id === "importFile") importFile(el.files[0]);
+  if (el.dataset.group != null) { S.settings.groups ||= {}; const k = keyOf(el.dataset.group); if (el.value) S.settings.groups[k] = el.value; else delete S.settings.groups[k]; save(); toast(el.value ? "Группа: " + el.value.toLowerCase() : "Группа определяется автоматически"); }
 });
 
 document.addEventListener("click", e => {
@@ -482,6 +596,17 @@ document.addEventListener("click", e => {
     case "pex-up": case "pex-down": { const x = day.exercises, j = act === "pex-up" ? ei - 1 : ei + 1; [x[j], x[ei]] = [x[ei], x[j]]; save(); const y = scrollY; render(); scrollTo(0, y); break; }
     case "pex-del": day.exercises.splice(ei, 1); save(); { const y = scrollY; render(); scrollTo(0, y); } break;
     case "pex-add": { day.exercises.push({ id: uid(), name: "", note: "", sets: [{ w: null, r: "10-12" }, { w: null, r: "10-12" }, { w: null, r: "10-12" }] }); save(); render(); const i = day.exercises.length - 1; const el = $(`#p-n-${i}`); el?.scrollIntoView({ block: "center" }); el?.focus(); break; }
+    case "body-new": draft = { id: uid(), date: today(), note: "" }; view = { tab: "body", bodyEdit: true }; render(); scrollTo(0, 0); $("#b-weight")?.focus(); break;
+    case "body-open": draft = clone(S.body.find(x => x.id === b.dataset.id)); view = { tab: "body", bodyEdit: true }; render(); scrollTo(0, 0); break;
+    case "body-cancel": draft = null; view = { tab: "body", metric: view.metric }; render(); scrollTo(0, 0); break;
+    case "body-save": {
+      if (!draft.date) { toast("Укажи дату"); return; }
+      if (!METRICS.some(([k]) => draft[k] != null)) { toast("Впиши хотя бы один замер"); return; }
+      const i = S.body.findIndex(x => x.id === draft.id); if (i >= 0) S.body[i] = draft; else S.body.push(draft);
+      save(); draft = null; view = { tab: "body" }; render(); scrollTo(0, 0); toast("Запись сохранена"); break;
+    }
+    case "body-del": S.body = S.body.filter(x => x.id !== draft.id); draft = null; save(); view = { tab: "body" }; render(); toast("Запись удалена"); break;
+    case "metric": view.metric = b.dataset.k; { const y = scrollY; render(); scrollTo(0, y); } break;
     case "export": exportData(); break;
     case "import": $("#importFile").value = ""; $("#importFile").click(); break;
     case "claude": copyForClaude(); break;
@@ -492,7 +617,7 @@ document.addEventListener("click", e => {
 
 /* ---------- резервная копия ---------- */
 async function exportData() {
-  const data = JSON.stringify({ app: "gymlog", version: 1, exportedAt: new Date().toISOString(), program: S.program, log: S.log, settings: S.settings, nextDayId: S.nextDayId }, null, 1);
+  const data = JSON.stringify({ app: "gymlog", version: 1, exportedAt: new Date().toISOString(), program: S.program, log: S.log, body: S.body, settings: S.settings, nextDayId: S.nextDayId }, null, 1);
   const name = `trenirovki-${today()}.json`;
   const file = new File([data], name, { type: "application/json" });
   try {
@@ -509,7 +634,7 @@ async function importFile(f) {
   try {
     const d = JSON.parse(await f.text());
     if (!d || d.app !== "gymlog" || !d.program?.days || !Array.isArray(d.log)) throw new Error();
-    pendingImport = { program: d.program, log: d.log, settings: d.settings || { rest: 120 }, nextDayId: d.nextDayId || null, active: null };
+    pendingImport = { program: d.program, log: d.log, body: Array.isArray(d.body) ? d.body : [], settings: d.settings || { rest: 120 }, nextDayId: d.nextDayId || null, active: null };
     $("#main").insertAdjacentHTML("afterbegin", `<div class="card" style="border-color:var(--warn)"><h3>Заменить данные?</h3>
       <p class="small">В копии ${d.log.length} ${plural(d.log.length, "тренировка", "тренировки", "тренировок")} и ${d.program.days.length} дн. программы. Текущие данные на телефоне будут заменены.</p>
       <div class="row"><button class="primary" data-act="import-ok">Заменить</button><button data-act="tab" data-v="program">Отмена</button></div></div>`);
@@ -518,7 +643,8 @@ async function importFile(f) {
 }
 async function copyForClaude() {
   const L = [...S.log].sort((a, b) => b.date.localeCompare(a.date)).slice(0, 10).reverse();
-  const txt = "Запиши в дневник тренировок:\n" + L.map(w => `${w.date} (${w.dayName}): ` + w.exercises.map(e => `${e.name} ${e.sets.map(s => (s.w ? fnum(s.w) + "×" : "") + s.r).join(", ")}${e.note ? ` [${e.note}]` : ""}`).join("; ") + (w.note ? `. ${w.note}` : "")).join("\n");
+  const txt = "Запиши в дневник тренировок:\n" + L.map(w => `${w.date} (${w.dayName}): ` + w.exercises.map(e => `${e.name} ${e.sets.map(s => (s.w ? fnum(s.w) + "×" : "") + s.r).join(", ")}${e.note ? ` [${e.note}]` : ""}`).join("; ") + (w.note ? `. ${w.note}` : "")).join("\n")
+    + (S.body.length ? "\nЗамеры тела:\n" + bodySorted().slice(-5).map(e => `${e.date}: ` + METRICS.filter(([k]) => e[k] != null).map(([k, l, u]) => `${l} ${fnum(e[k])} ${u}`).join(", ")).join("\n") : "");
   try { await navigator.clipboard.writeText(txt); toast("Скопировано. Вставь в чат с Claude"); }
   catch (e) {
     $("#main").insertAdjacentHTML("afterbegin", `<div class="card"><h3>Скопируй текст</h3><textarea readonly style="min-height:160px">${esc(txt)}</textarea></div>`);
