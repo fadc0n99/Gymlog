@@ -1,10 +1,15 @@
-// Офлайн-кэш приложения. При изменении файлов увеличь номер версии.
-const CACHE = "gymlog-v5";
+// Офлайн-кэш приложения. При любом изменении файлов увеличь номер версии —
+// по нему телефон понимает, что пора скачать новую версию целиком.
+const CACHE = "gymlog-v6";
 const FILES = ["./", "index.html", "style.css", "app.js", "manifest.webmanifest",
   "icon-180.png", "icon-192.png", "icon-512.png"];
 
+// Все файлы версии скачиваются вместе и в обход HTTP-кэша,
+// поэтому старый app.js не может смешаться с новым index.html.
 self.addEventListener("install", e => {
-  e.waitUntil(caches.open(CACHE).then(c => c.addAll(FILES)).then(() => self.skipWaiting()));
+  e.waitUntil(caches.open(CACHE)
+    .then(c => c.addAll(FILES.map(f => new Request(f, { cache: "reload" }))))
+    .then(() => self.skipWaiting()));
 });
 
 self.addEventListener("activate", e => {
@@ -13,15 +18,12 @@ self.addEventListener("activate", e => {
     .then(() => self.clients.claim()));
 });
 
-// Сразу отдаём из кэша (мгновенно и без сети), а в фоне обновляем кэш —
-// новая версия подхватится при следующем запуске.
+// Только из кэша текущей версии; сеть — для всего остального.
 self.addEventListener("fetch", e => {
   if (e.request.method !== "GET" || new URL(e.request.url).origin !== location.origin) return;
   e.respondWith(caches.open(CACHE).then(async c => {
-    const cached = await c.match(e.request, { ignoreSearch: true })
+    const hit = await c.match(e.request, { ignoreSearch: true })
       || (e.request.mode === "navigate" ? await c.match("index.html") : undefined);
-    const net = fetch(e.request).then(res => { if (res.ok) c.put(e.request, res.clone()); return res; }).catch(() => null);
-    if (cached) { e.waitUntil(net); return cached; }
-    return (await net) || Response.error();
+    return hit || fetch(e.request);
   }));
 });

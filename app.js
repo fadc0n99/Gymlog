@@ -311,7 +311,8 @@ function render() {
     : view.tab === "history" ? (view.open ? vWorkout(view.open) : vHistory())
     : view.tab === "progress" ? (view.ex ? vExercise(view.ex) : vProgress())
     : view.tab === "body" ? (view.bodyEdit ? vBodyEdit() : vBody())
-    : (view.day ? vDayEdit(view.day) : vProgram());
+    : view.tab === "program" ? (view.day ? vDayEdit(view.day) : vProgram())
+    : vToday();
 }
 
 function vToday() {
@@ -656,5 +657,11 @@ async function copyForClaude() {
 if (S.active) { requestWake(); }
 render();
 if ("serviceWorker" in navigator) {
-  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => { }));
+  // Когда установилась новая версия — один раз перезагружаемся на неё. Данные в localStorage не теряются.
+  const hadController = !!navigator.serviceWorker.controller;
+  let reloaded = false;
+  navigator.serviceWorker.addEventListener("controllerchange", () => { if (hadController && !reloaded) { reloaded = true; location.reload(); } });
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js", { updateViaCache: "none" })
+    .then(reg => document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") reg.update().catch(() => { }); }))
+    .catch(() => { }));
 }
